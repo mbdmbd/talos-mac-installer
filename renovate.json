@@ -15,5 +15,25 @@
       "depNameTemplate": "siderolabs/talos",
       "datasourceTemplate": "github-releases"
     }
+  ],
+  "packageRules": [
+    {
+      "description": "Automatically build stable Talos releases",
+      "matchDatasources": [
+        "github-releases"
+      ],
+      "matchPackageNames": [
+        "siderolabs/talos"
+      ],
+      "matchUpdateTypes": [
+        "major",
+        "minor",
+        "patch"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash",
+      "ignoreTests": true
+    }
   ]
 }

@@ -2,7 +2,7 @@ name: build-installer
 
 # Builds a GCC-linked Talos installer image + USB ISO for legacy Intel Mac minis.
 # Installer image -> ghcr.io/<owner>/talos-mac/installer:<version>
-# ISO             -> attached to a GitHub Release named after the version.
+# ISO             -> attached to a GitHub Release tagged mac-<version>.
 
 # Builds when Renovate updates versions.env on main, or when manually dispatched.
 # Pull requests do not build because kernel compiles are expensive.
@@ -82,7 +82,7 @@ jobs:
       - name: Upload ISO to release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          tag_name: ${{ env.TALOS_VERSION }}
+          tag_name: mac-${{ env.TALOS_VERSION }}
           target_commitish: ${{ github.sha }}
           name: Talos ${{ env.TALOS_VERSION }} (legacy Intel Mac, GCC kernel)
           files: _out/*.iso

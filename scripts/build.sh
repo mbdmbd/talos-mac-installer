@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build a Talos installer + ISO with a GCC-linked kernel so 2018 T2 Intel Macs
-# cold-boot. The fix: drop `LLVM: 1` from the kernel pkg so the EFI stub is linked
+# Build a Talos installer + ISO with a GCC-linked kernel for legacy Intel Mac minis.
+# This fork currently targets Macmini5,3 and Macmini6,1. The fix: drop `LLVM: 1` from the kernel pkg so the EFI stub is linked
 # by GNU ld instead of LLD (siderolabs/talos#13579 / #13231).
 #
 # Runs on a Linux/amd64 host with Docker. Designed for GitHub Actions ubuntu-latest
@@ -12,9 +12,6 @@ set -euo pipefail
 
 : "${REGISTRY:?set REGISTRY, e.g. ghcr.io/<owner>/talos-mac}"
 : "${TALOS_VERSION:?}"
-# Extensions tag every patch release, so default to the Talos version. pkgs does NOT
-# tag per-patch — its ref is derived from the talos Makefile's PKGS pin (resolve_pkgs_ref).
-: "${EXTENSIONS_REF:=$TALOS_VERSION}"
 : "${PLATFORM:=linux/amd64}" "${ARCH:=amd64}"
 WORK="${WORK:-$(pwd)/_src}"
 OUT="${OUT:-$(pwd)/_out}"
@@ -108,47 +105,7 @@ build_pkgs_kernel() {
   cd - >/dev/null
 }
 
-# i915 pulls BOTH kernel and linux-firmware from a single PKGS_PREFIX. kernel is our
-# custom build; linux-firmware is stock (GPU blobs, kernel-independent). Mirror the
-# stock firmware into our prefix under the dirty tag so the one shared prefix resolves.
-mirror_pkg_deps() {
-  local dst="$REGISTRY/pkgs/linux-firmware:$PKGS_TAG"
-  if crane manifest "$dst" >/dev/null 2>&1; then
-    log "linux-firmware already mirrored ($dst)"; return
-  fi
-  log "mirror stock linux-firmware -> $dst"
-  crane copy "ghcr.io/siderolabs/linux-firmware:$PKGS_PIN" "$dst"
-}
-
-# 2) Kernel-module extensions rebuilt against the custom kernel. These ship signed
-# .ko files; our kernel enforces module signatures with OUR build's key, so a stock
-# image (signed with siderolabs' key) would be rejected — they must be rebuilt here.
-# Firmware/userspace extensions (intel-ucode, iscsi-tools, util-linux-tools) have no
-# modules and are pulled stock in the imager profile.
-MODULE_EXTS=(i915 thunderbolt)
-build_extensions() {
-  mirror_pkg_deps   # linux-firmware, needed by i915
-  clone https://github.com/siderolabs/extensions.git "$EXTENSIONS_REF" extensions
-  cd "$WORK/extensions"
-  local ext built
-  for ext in "${MODULE_EXTS[@]}"; do
-    if [ "${FORCE_EXT:-0}" != "1" ] && crane manifest "$REGISTRY/extensions/$ext:$TALOS_VERSION" >/dev/null 2>&1; then
-      log "extension $ext:$TALOS_VERSION already built — skipping (FORCE_EXT=1 to rebuild)"; continue
-    fi
-    log "extensions: $ext (against custom kernel) @ $EXTENSIONS_REF"
-    make "$ext" TAG="$TALOS_VERSION" REGISTRY="$REGISTRY" USERNAME=extensions PUSH=true \
-      PLATFORM="$PLATFORM" PKGS="$PKGS_TAG" PKGS_PREFIX="$REGISTRY/pkgs" \
-      2>&1 | tee "$OUT/$ext-build.log"
-    # extensions self-tag (datestamp-version); capture the pushed ref and pin to :VERSION
-    built="$(grep -oE "$REGISTRY/extensions/$ext:[A-Za-z0-9._-]+" "$OUT/$ext-build.log" | tail -1)"
-    [ -n "$built" ] || { echo "could not capture $ext image ref from build log" >&2; exit 1; }
-    log "retag $ext $built -> :$TALOS_VERSION"
-    crane copy "$built" "$REGISTRY/extensions/$ext:$TALOS_VERSION"
-  done
-  cd - >/dev/null
-}
-
-# 3) Talos boot artifacts (kernel/initramfs/installer-base/imager) with the custom kernel.
+# 2) Talos boot artifacts (kernel/initramfs/installer-base/imager) with the custom kernel.
 build_talos() {
   # make_iso/make_installer only RUN the imager image, so if it's already published we
   # can skip rebuilding the talos artifacts and iterate the imager steps in minutes.
@@ -174,26 +131,22 @@ imager() { # runs the imager container against a rendered profile on stdin
     "$REGISTRY/imager/imager:$TALOS_VERSION" -
 }
 
-# 4a) ISO for USB fresh installs.
+# 3a) ISO for USB fresh installs.
 make_iso() {
   log "imager: metal ISO"
   OUTPUT_KIND=iso OUTPUT_FORMAT=raw REGISTRY="$REGISTRY" ARCH="$ARCH" \
     TALOS_VERSION="$TALOS_VERSION" \
-    EXT_INTEL_UCODE="$EXT_INTEL_UCODE" EXT_ISCSI_TOOLS="$EXT_ISCSI_TOOLS" \
-    EXT_UTIL_LINUX="$EXT_UTIL_LINUX" \
     scripts/gen-profile.sh | imager
   ls -lh "$OUT"/*.iso
 }
 
-# 4b) Installer image for `talosctl upgrade --image` and talconfig talosImageURL.
+# 3b) Installer image for `talosctl upgrade --image` and talconfig talosImageURL.
 make_installer() {
   log "imager: installer image -> $REGISTRY/installer:$TALOS_VERSION"
   # outFormat=raw = passthrough (no extra compression); the asset stays installer-*.tar.
   # An empty/absent outFormat decodes to "unknown" and the imager errors.
   OUTPUT_KIND=installer OUTPUT_FORMAT=raw REGISTRY="$REGISTRY" ARCH="$ARCH" \
     TALOS_VERSION="$TALOS_VERSION" \
-    EXT_INTEL_UCODE="$EXT_INTEL_UCODE" EXT_ISCSI_TOOLS="$EXT_ISCSI_TOOLS" \
-    EXT_UTIL_LINUX="$EXT_UTIL_LINUX" \
     scripts/gen-profile.sh | imager
   # imager writes an OCI/docker tarball into /out; push it under a clean name.
   local tar
@@ -207,7 +160,6 @@ main() {
   setup_buildx
   resolve_pkgs_ref
   build_pkgs_kernel
-  build_extensions
   build_talos
   make_iso
   make_installer

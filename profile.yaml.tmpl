@@ -19,22 +19,6 @@ input:
   baseInstaller:
     # installer-base built from siderolabs/talos against the CUSTOM (GCC-linked) kernel
     imageRef: ${REGISTRY}/imager/installer-base:${TALOS_VERSION}
-  systemExtensions:
-    # kernel-module extensions rebuilt against the custom kernel (module signatures
-    # must be made with our kernel's key, which the kernel enforces at load)
-    - imageRef: ${REGISTRY}/extensions/i915:${TALOS_VERSION}
-    - imageRef: ${REGISTRY}/extensions/thunderbolt:${TALOS_VERSION}
-    # stock firmware/userspace extensions (no kernel modules -> no rebuild)
-    - imageRef: ${EXT_INTEL_UCODE}
-    - imageRef: ${EXT_ISCSI_TOOLS}
-    - imageRef: ${EXT_UTIL_LINUX}
 output:
   kind: ${OUTPUT_KIND}
   outFormat: ${OUTPUT_FORMAT}
-customization:
-  # Kernel args for the T2 Mac mini. pcie_ports=compat is what makes the Apple NVMe
-  # usable; intel_iommu/iommu=pt are the usual i915 args.
-  extraKernelArgs:
-    - intel_iommu=on
-    - iommu=pt
-    - pcie_ports=compat
